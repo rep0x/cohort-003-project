@@ -53,7 +53,7 @@ const deleteSchema = z.object({
 });
 
 /** Resolve the course a lesson belongs to (for permission checks). */
-export function resolveCourseForLesson(lessonId: number) {
+function resolveCourseForLesson(lessonId: number) {
   const lesson = getLessonById(lessonId);
   if (!lesson) return null;
   const mod = getModuleById(lesson.moduleId);
@@ -65,7 +65,7 @@ export function resolveCourseForLesson(lessonId: number) {
  * Validate sanitized comment HTML: reject empty/whitespace-only content and
  * content over the visible-character cap. Returns an error string or null.
  */
-export function validateCommentContent(sanitizedHtml: string): string | null {
+function validateCommentContent(sanitizedHtml: string): string | null {
   const text = extractCommentText(sanitizedHtml).trim();
   if (text.length === 0) return "Comment cannot be empty";
   if (text.length > MAX_COMMENT_CHARS) {
