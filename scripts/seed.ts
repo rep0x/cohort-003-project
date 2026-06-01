@@ -43,8 +43,12 @@ function slugify(title: string): string {
 async function seed() {
   console.log("Seeding database...");
 
-  // Drop and recreate tables for a clean seed
+  // Drop and recreate tables for a clean seed. Disable FK enforcement while
+  // dropping so self-referential tables (comments → comments) don't trip the
+  // implicit delete-on-drop; re-enabled immediately after.
+  sqlite.pragma("foreign_keys = OFF");
   sqlite.exec(`
+    DROP TABLE IF EXISTS comments;
     DROP TABLE IF EXISTS video_watch_events;
     DROP TABLE IF EXISTS quiz_answers;
     DROP TABLE IF EXISTS quiz_attempts;
@@ -64,6 +68,7 @@ async function seed() {
     DROP TABLE IF EXISTS users;
     DROP TABLE IF EXISTS __drizzle_migrations;
   `);
+  sqlite.pragma("foreign_keys = ON");
 
   // Create tables using the same Drizzle migrations as the live database
   migrate(db, { migrationsFolder });
@@ -1727,6 +1732,101 @@ You've completed the Building REST APIs course. You now have the skills to build
     `Created 1 team with Bossy McBossface as admin, 1 team purchase, and ${seededCoupons.length} coupons (2 redeemed, 3 available).`
   );
 
+  // ─── Lesson Comments ───
+  // Sample discussion so the comments section has content on first run:
+  // top-level comments from students with one-level-deep staff replies.
+  // Content is hand-written sanitized HTML consistent with the comment
+  // editor's allow-list (strong / em / s / p / span color-palette only).
+  const seededComments = db
+    .insert(schema.comments)
+    .values([
+      {
+        lessonId: course1LessonIds[0],
+        userId: students[0].id,
+        parentId: null,
+        contentHtml:
+          "<p>This intro really clicked for me — the <strong>type inference</strong> examples were great.</p>",
+        createdAt: daysAgo(12),
+        updatedAt: daysAgo(12),
+      },
+      {
+        lessonId: course1LessonIds[0],
+        userId: students[1].id,
+        parentId: null,
+        contentHtml:
+          '<p>Quick question: when should I reach for <span style="color:#2563eb">interfaces</span> over <span style="color:#9333ea">type aliases</span>?</p>',
+        createdAt: daysAgo(10),
+        updatedAt: daysAgo(10),
+      },
+      {
+        lessonId: course1LessonIds[2],
+        userId: students[2].id,
+        parentId: null,
+        contentHtml:
+          "<p>I keep hitting a <s>compiler</s> <em>type</em> error on the generics exercise. Any tips?</p>",
+        createdAt: daysAgo(6),
+        updatedAt: daysAgo(6),
+      },
+      {
+        lessonId: course2LessonIds[0],
+        userId: students[3].id,
+        parentId: null,
+        contentHtml:
+          "<p>Loving the Node.js track so far. The pacing is <strong>perfect</strong>.</p>",
+        createdAt: daysAgo(4),
+        updatedAt: daysAgo(4),
+      },
+    ])
+    .returning()
+    .all();
+
+  // Staff replies (instructor / admin), one level deep, beneath the comments.
+  const seededReplies = db
+    .insert(schema.comments)
+    .values([
+      {
+        lessonId: seededComments[1].lessonId,
+        userId: instructor1.id,
+        parentId: seededComments[1].id,
+        contentHtml:
+          '<p>Great question! Reach for <span style="color:#16a34a">interfaces</span> when modelling object shapes you may extend; use type aliases for unions and primitives.</p>',
+        createdAt: daysAgo(9),
+        updatedAt: daysAgo(9),
+      },
+      {
+        lessonId: seededComments[2].lessonId,
+        userId: instructor2.id,
+        parentId: seededComments[2].id,
+        contentHtml:
+          "<p>Make sure your type parameter is <strong>declared</strong> before it's used. Drop your snippet here if it still fails!</p>",
+        createdAt: daysAgo(5),
+        updatedAt: daysAgo(5),
+      },
+      {
+        lessonId: seededComments[2].lessonId,
+        userId: admin.id,
+        parentId: seededComments[2].id,
+        contentHtml:
+          '<p>Adding to that — there is a <span style="color:#d97706">pinned</span> cheatsheet in the resources tab.</p>',
+        createdAt: daysAgo(5),
+        updatedAt: daysAgo(5),
+      },
+      {
+        lessonId: seededComments[3].lessonId,
+        userId: instructor2.id,
+        parentId: seededComments[3].id,
+        contentHtml: "<p>Thanks for the kind words — more coming soon!</p>",
+        createdAt: daysAgo(3),
+        updatedAt: daysAgo(3),
+      },
+    ])
+    .returning()
+    .all();
+
+  console.log(
+    `Created ${seededComments.length} top-level comments and ${seededReplies.length} staff replies across seeded lessons.`
+  );
+
   console.log("\n✓ Seed complete!");
   console.log("  Users: 9 (1 admin, 2 instructors, 6 students)");
   console.log("  Categories: 5");
@@ -1737,6 +1837,9 @@ You've completed the Building REST APIs course. You now have the skills to build
   console.log("  Enrollments: 7");
   console.log("  Purchases: 6 (5 individual + 1 team)");
   console.log("  Teams: 1 (with 5 coupons)");
+  console.log(
+    `  Comments: ${seededComments.length} top-level + ${seededReplies.length} staff replies`
+  );
 }
 
 seed().catch(console.error);
