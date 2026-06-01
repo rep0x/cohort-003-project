@@ -266,6 +266,9 @@ export async function loader({ params, request }: Route.LoaderArgs) {
       instructorId: courseWithDetails.instructorId,
     });
   }
+  const viewer = viewerUser
+    ? { id: viewerUser.id, role: viewerUser.role }
+    : null;
   // Only admins/instructors may reply to comments.
   const canReply = !!(
     viewerUser &&
@@ -281,7 +284,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     comments,
     canComment,
     canReply,
-    viewer: viewerUser ? { id: viewerUser.id, role: viewerUser.role } : null,
+    viewer,
     curriculum: courseWithDetails.modules.map((m) => ({
       id: m.id,
       title: m.title,

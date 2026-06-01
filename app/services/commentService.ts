@@ -134,7 +134,12 @@ export function createReply(
 
   return db
     .insert(comments)
-    .values({ lessonId: parent.lessonId, userId, parentId: parent.id, contentHtml })
+    .values({
+      lessonId: parent.lessonId,
+      userId,
+      parentId: parent.id,
+      contentHtml,
+    })
     .returning()
     .get();
 }
@@ -151,6 +156,30 @@ export function listReplies(parentId: number): CommentWithAuthor[] {
     .orderBy(sql`${comments.createdAt} ASC`, sql`${comments.id} ASC`)
     .all()
     .map(toCommentWithAuthor);
+}
+
+/**
+ * Edit a comment's content. Only the author may edit; HTML is re-sanitized and
+ * `updatedAt` advances. Throws if the comment is missing or the user isn't the
+ * author.
+ */
+export function updateComment(id: number, userId: number, dirtyHtml: string) {
+  const comment = getCommentById(id);
+  if (!comment) {
+    throw new Error("Comment not found");
+  }
+  if (comment.userId !== userId) {
+    throw new Error("Only the author can edit this comment");
+  }
+
+  const contentHtml = sanitizeCommentHtml(dirtyHtml);
+
+  return db
+    .update(comments)
+    .set({ contentHtml, updatedAt: new Date().toISOString() })
+    .where(eq(comments.id, id))
+    .returning()
+    .get();
 }
 
 /** Count a lesson's top-level comments (for pagination). */

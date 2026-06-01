@@ -11,6 +11,7 @@ import { canViewLesson, isStaff } from "~/lib/permissions";
 import {
   createComment,
   createReply,
+  updateComment,
   getCommentById,
 } from "~/services/commentService";
 import {
@@ -32,6 +33,12 @@ const createSchema = z.object({
 const replySchema = z.object({
   intent: z.literal("reply"),
   parentId: z.coerce.number().int().positive(),
+  contentHtml: z.string(),
+});
+
+const editSchema = z.object({
+  intent: z.literal("edit"),
+  commentId: z.coerce.number().int().positive(),
   contentHtml: z.string(),
 });
 
@@ -130,6 +137,33 @@ export async function action({ request }: Route.ActionArgs) {
         { status: 400 }
       );
     }
+  }
+
+  if (intent === "edit") {
+    const parsed = parseFormData(formData, editSchema);
+    if (!parsed.success) {
+      return data({ errors: parsed.errors }, { status: 400 });
+    }
+    const { commentId, contentHtml } = parsed.data;
+
+    const comment = getCommentById(commentId);
+    if (!comment) {
+      throw data("Comment not found", { status: 404 });
+    }
+    // Author-only gate: only the original author may edit.
+    if (comment.userId !== user.id) {
+      throw data("Only the author can edit this comment", { status: 403 });
+    }
+
+    // Sanitize first (storage boundary), then validate the visible text.
+    const sanitized = sanitizeCommentHtml(contentHtml);
+    const error = validateCommentContent(sanitized);
+    if (error) {
+      return data({ errors: { contentHtml: error } }, { status: 400 });
+    }
+
+    updateComment(commentId, user.id, sanitized);
+    return { success: true };
   }
 
   throw data("Invalid action", { status: 400 });

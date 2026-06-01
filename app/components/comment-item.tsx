@@ -1,11 +1,14 @@
-import { useState } from "react";
-import { Reply } from "lucide-react";
+import { useEffect, useState } from "react";
+import { useFetcher } from "react-router";
+import { Reply, Pencil } from "lucide-react";
 import { UserAvatar } from "~/components/user-avatar";
 import { Button } from "~/components/ui/button";
 import { ReplyComposer } from "~/components/comment-reply";
+import { CommentEditor } from "~/components/comment-editor";
+import { MAX_COMMENT_CHARS } from "~/lib/comment-colors";
 import { cn } from "~/lib/utils";
 
-// Viewer identity passed down for action affordances (e.g. who may reply).
+// Viewer identity passed down for action affordances (who may reply / edit).
 export type CommentViewer = { id: number; role: string };
 
 // Serializable shape of a comment as it crosses the loader boundary.
@@ -67,6 +70,8 @@ export function CommentItem({
   lessonId?: number;
 }) {
   const edited = comment.updatedAt !== comment.createdAt;
+  const canEdit = viewer?.id === comment.userId;
+  const [editing, setEditing] = useState(false);
   const [replying, setReplying] = useState(false);
   // Reply is a top-level-only, staff-only affordance.
   const showReply = !isReply && canReply && lessonId !== undefined;
@@ -92,24 +97,46 @@ export function CommentItem({
           )}
         </div>
 
-        <div
-          className="prose prose-sm prose-neutral dark:prose-invert mt-1 max-w-none break-words"
-          dangerouslySetInnerHTML={{ __html: comment.contentHtml }}
-        />
+        {editing ? (
+          <CommentEditForm
+            commentId={comment.id}
+            initialContent={comment.contentHtml}
+            onDone={() => setEditing(false)}
+          />
+        ) : (
+          <div
+            className="prose prose-sm prose-neutral dark:prose-invert mt-1 max-w-none break-words"
+            dangerouslySetInnerHTML={{ __html: comment.contentHtml }}
+          />
+        )}
 
-        {/* Action affordances. Reply is top-level-only and staff-only. */}
-        {showReply && (
-          <div className="mt-2">
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              className="h-7 px-2 text-muted-foreground"
-              onClick={() => setReplying((r) => !r)}
-            >
-              <Reply className="mr-1.5 size-3.5" />
-              Reply
-            </Button>
+        {/* Action affordances (reply / edit / delete). */}
+        {!editing && (showReply || canEdit) && (
+          <div className="mt-1 flex items-center gap-1">
+            {showReply && (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-7 px-2 text-xs text-muted-foreground"
+                onClick={() => setReplying((r) => !r)}
+              >
+                <Reply className="mr-1 size-3.5" />
+                Reply
+              </Button>
+            )}
+            {canEdit && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-xs text-muted-foreground"
+                onClick={() => setEditing(true)}
+              >
+                <Pencil className="mr-1 size-3.5" />
+                Edit
+              </Button>
+            )}
           </div>
         )}
 
@@ -125,11 +152,102 @@ export function CommentItem({
         {!isReply && comment.replies && comment.replies.length > 0 && (
           <div className="mt-3 space-y-3 border-l border-border pl-4">
             {comment.replies.map((reply) => (
-              <CommentItem key={reply.id} comment={reply} isReply />
+              <CommentItem
+                key={reply.id}
+                comment={reply}
+                isReply
+                viewer={viewer}
+                lessonId={lessonId}
+              />
             ))}
           </div>
         )}
       </div>
     </div>
+  );
+}
+
+// Inline editor for an existing comment. Posts the "edit" intent to the
+// comments resource route; on success the loader revalidates and the parent
+// closes the editor (showing the updated body + "(edited)").
+function CommentEditForm({
+  commentId,
+  initialContent,
+  onDone,
+}: {
+  commentId: number;
+  initialContent: string;
+  onDone: () => void;
+}) {
+  const fetcher = useFetcher<{
+    success?: boolean;
+    errors?: Record<string, string>;
+  }>();
+  const [html, setHtml] = useState(initialContent);
+  // Seed the counter from the existing content so an unchanged comment (TipTap
+  // only fires onUpdate on edits, not on mount) can still be saved.
+  const [textLen, setTextLen] = useState(() =>
+    initialContent.replace(/<[^>]*>/g, "").trim().length
+  );
+
+  const submitting = fetcher.state !== "idle";
+  const serverError = fetcher.data?.errors?.contentHtml;
+
+  useEffect(() => {
+    if (fetcher.state === "idle" && fetcher.data?.success) {
+      onDone();
+    }
+  }, [fetcher.state, fetcher.data, onDone]);
+
+  const tooLong = textLen > MAX_COMMENT_CHARS;
+  const canSubmit = textLen > 0 && !tooLong && !submitting;
+
+  return (
+    <fetcher.Form
+      method="post"
+      action="/api/comments"
+      className="mt-1"
+      onSubmit={(e) => {
+        if (!canSubmit) e.preventDefault();
+      }}
+    >
+      <input type="hidden" name="intent" value="edit" />
+      <input type="hidden" name="commentId" value={commentId} />
+      <input type="hidden" name="contentHtml" value={html} />
+
+      <CommentEditor
+        initialContent={initialContent}
+        onChange={setHtml}
+        onTextChange={(text) => setTextLen(text.trim().length)}
+      />
+
+      <div className="mt-2 flex items-center justify-between">
+        <div className="text-xs">
+          {serverError ? (
+            <span className="text-destructive">{serverError}</span>
+          ) : (
+            <span
+              className={tooLong ? "text-destructive" : "text-muted-foreground"}
+            >
+              {textLen}/{MAX_COMMENT_CHARS}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={onDone}
+            disabled={submitting}
+          >
+            Cancel
+          </Button>
+          <Button type="submit" size="sm" disabled={!canSubmit}>
+            {submitting ? "Saving…" : "Save"}
+          </Button>
+        </div>
+      </div>
+    </fetcher.Form>
   );
 }

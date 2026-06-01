@@ -21,6 +21,7 @@ import {
   listTopLevelComments,
   countTopLevelComments,
   getCommentById,
+  updateComment,
 } from "./commentService";
 import { isStaff } from "~/lib/permissions";
 import {
@@ -242,5 +243,53 @@ describe("comment sanitization", () => {
     expect(COLOR_STYLE_REGEX.test("#000000")).toBe(false);
     expect(COLOR_STYLE_REGEX.test("#ffffff")).toBe(false);
     expect(COLOR_STYLE_REGEX.test("red")).toBe(false);
+  });
+});
+
+describe("updateComment", () => {
+  beforeEach(() => {
+    testDb = createTestDb();
+    base = seedBaseData(testDb);
+    lesson = makeLesson();
+  });
+
+  it("lets the author edit their own comment and re-sanitizes the content", () => {
+    const comment = createComment(lesson.id, base.user.id, "<p>original</p>");
+    // Force a distinct createdAt so updatedAt is guaranteed to differ.
+    testDb
+      .update(schema.comments)
+      .set({
+        createdAt: "2020-01-01T00:00:00.000Z",
+        updatedAt: "2020-01-01T00:00:00.000Z",
+      })
+      .where(eq(schema.comments.id, comment.id))
+      .run();
+
+    const updated = updateComment(
+      comment.id,
+      base.user.id,
+      '<p>edited <strong>bold</strong></p><script>alert(1)</script>'
+    );
+
+    expect(updated.id).toBe(comment.id);
+    expect(updated.contentHtml).toContain("edited");
+    expect(updated.contentHtml).toContain("<strong>");
+    // Re-sanitized on write: disallowed tags/contents are stripped.
+    expect(updated.contentHtml).not.toContain("<script>");
+    expect(updated.contentHtml).not.toContain("alert");
+    // updatedAt advances past createdAt.
+    expect(updated.updatedAt).not.toBe(updated.createdAt);
+    expect(updated.createdAt).toBe("2020-01-01T00:00:00.000Z");
+  });
+
+  it("rejects edits from anyone who is not the author", () => {
+    const comment = createComment(lesson.id, base.user.id, "<p>original</p>");
+
+    expect(() =>
+      updateComment(comment.id, base.instructor.id, "<p>hijack</p>")
+    ).toThrow("Only the author can edit this comment");
+
+    // Content is unchanged.
+    expect(getCommentById(comment.id)?.contentHtml).toContain("original");
   });
 });
