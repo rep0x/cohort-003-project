@@ -20,6 +20,7 @@ export function CommentsSection({
   viewer,
   canReply = false,
   canModerate = false,
+  commentTotal,
 }: {
   lessonId: number;
   comments: CommentView[];
@@ -27,16 +28,41 @@ export function CommentsSection({
   viewer?: CommentViewer | null;
   canReply?: boolean;
   canModerate?: boolean;
+  commentTotal?: number;
 }) {
+  // Additional pages fetched on demand via "Show more", appended after the
+  // initial loader page. The service paginates a stable newest-first order.
+  const [extra, setExtra] = useState<CommentView[]>([]);
+  const loadFetcher = useFetcher<{ comments: CommentView[]; total: number }>();
+
+  useEffect(() => {
+    const page = loadFetcher.data?.comments;
+    if (!page || page.length === 0) return;
+    setExtra((prev) => {
+      const seen = new Set(prev.map((c) => c.id));
+      const additions = page.filter((c) => !seen.has(c.id));
+      return additions.length > 0 ? [...prev, ...additions] : prev;
+    });
+  }, [loadFetcher.data]);
+
+  const loaded = comments.length + extra.length;
+  const total = commentTotal ?? comments.length;
+  const hasMore = loaded < total;
+  const loadingMore = loadFetcher.state !== "idle";
+
+  function loadMore() {
+    loadFetcher.load(`/api/comments?lessonId=${lessonId}&offset=${loaded}`);
+  }
+
   return (
     <section className="mb-8 border-t pt-8">
       <div className="mb-6 flex items-center gap-2">
         <MessageSquare className="size-5 text-muted-foreground" />
         <h2 className="text-xl font-semibold">
           Comments
-          {comments.length > 0 && (
+          {total > 0 && (
             <span className="ml-2 text-base font-normal text-muted-foreground">
-              {comments.length}
+              {total}
             </span>
           )}
         </h2>
@@ -50,7 +76,7 @@ export function CommentsSection({
         </p>
       )}
 
-      {comments.length === 0 ? (
+      {loaded === 0 ? (
         <p className="text-sm text-muted-foreground">
           No comments yet. Be the first to start the discussion.
         </p>
@@ -66,6 +92,29 @@ export function CommentsSection({
               canModerate={canModerate}
             />
           ))}
+          {extra.map((comment) => (
+            <CommentItem
+              key={comment.id}
+              comment={comment}
+              lessonId={lessonId}
+              viewer={viewer}
+              canReply={canReply}
+              canModerate={canModerate}
+            />
+          ))}
+        </div>
+      )}
+
+      {hasMore && (
+        <div className="mt-6">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={loadMore}
+            disabled={loadingMore}
+          >
+            {loadingMore ? "Loading…" : "Show more"}
+          </Button>
         </div>
       )}
     </section>

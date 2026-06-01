@@ -23,6 +23,7 @@ import {
   getCommentById,
   updateComment,
   deleteComment,
+  COMMENTS_PAGE_SIZE,
 } from "./commentService";
 import { isStaff } from "~/lib/permissions";
 import {
@@ -469,5 +470,74 @@ describe("deleteComment", () => {
     expect(getCommentById(reply2.id)).toBeUndefined();
     expect(getCommentById(parent.id)).toBeDefined();
     expect(getCommentById(reply1.id)).toBeDefined();
+  });
+});
+
+describe("pagination", () => {
+  beforeEach(() => {
+    testDb = createTestDb();
+    base = seedBaseData(testDb);
+    lesson = makeLesson();
+  });
+
+  // Create `count` top-level comments with strictly increasing createdAt so the
+  // newest-first ordering is deterministic regardless of timestamp resolution.
+  // Returns the comment ids in creation order (oldest → newest).
+  function seedComments(count: number): number[] {
+    const ids: number[] = [];
+    for (let i = 0; i < count; i++) {
+      const c = createComment(lesson.id, base.user.id, `<p>c${i}</p>`);
+      const minute = String(i + 1).padStart(2, "0");
+      testDb
+        .update(schema.comments)
+        .set({ createdAt: `2020-01-01T00:${minute}:00.000Z` })
+        .where(eq(schema.comments.id, c.id))
+        .run();
+      ids.push(c.id);
+    }
+    return ids;
+  }
+
+  it("returns only the first page when more comments exist", () => {
+    seedComments(COMMENTS_PAGE_SIZE + 5);
+
+    const firstPage = listTopLevelComments(lesson.id, COMMENTS_PAGE_SIZE);
+    expect(firstPage).toHaveLength(COMMENTS_PAGE_SIZE);
+  });
+
+  it("returns the remainder on the second page", () => {
+    seedComments(COMMENTS_PAGE_SIZE + 5);
+
+    const secondPage = listTopLevelComments(
+      lesson.id,
+      COMMENTS_PAGE_SIZE,
+      COMMENTS_PAGE_SIZE
+    );
+    expect(secondPage).toHaveLength(5);
+  });
+
+  it("preserves newest-first ordering across pages with no overlap", () => {
+    const total = COMMENTS_PAGE_SIZE + 5;
+    const idsOldestFirst = seedComments(total);
+    const expectedNewestFirst = [...idsOldestFirst].reverse();
+
+    const firstPage = listTopLevelComments(lesson.id, COMMENTS_PAGE_SIZE);
+    const secondPage = listTopLevelComments(
+      lesson.id,
+      COMMENTS_PAGE_SIZE,
+      COMMENTS_PAGE_SIZE
+    );
+
+    const combined = [...firstPage, ...secondPage].map((c) => c.id);
+    expect(combined).toEqual(expectedNewestFirst);
+    // No duplicate ids across the two pages.
+    expect(new Set(combined).size).toBe(total);
+  });
+
+  it("counts the full number of top-level comments", () => {
+    const total = COMMENTS_PAGE_SIZE + 5;
+    seedComments(total);
+
+    expect(countTopLevelComments(lesson.id)).toBe(total);
   });
 });

@@ -14,6 +14,10 @@ import {
   updateComment,
   deleteComment,
   getCommentById,
+  listTopLevelComments,
+  listReplies,
+  countTopLevelComments,
+  COMMENTS_PAGE_SIZE,
 } from "~/services/commentService";
 import {
   sanitizeCommentHtml,
@@ -68,6 +72,47 @@ export function validateCommentContent(sanitizedHtml: string): string | null {
     return `Comment is too long (max ${MAX_COMMENT_CHARS} characters)`;
   }
   return null;
+}
+
+/**
+ * Fetch a page of top-level comments for a lesson (used by the "Show more"
+ * button). Mirrors the action's viewer-access checks.
+ */
+export async function loader({ request }: Route.LoaderArgs) {
+  const currentUserId = await getCurrentUserId(request);
+  if (!currentUserId) {
+    throw data("You must be logged in", { status: 401 });
+  }
+  const user = getUserById(currentUserId);
+  if (!user) {
+    throw data("You must be logged in", { status: 401 });
+  }
+
+  const url = new URL(request.url);
+  const lessonId = Number(url.searchParams.get("lessonId"));
+  if (Number.isNaN(lessonId)) {
+    throw data("Invalid lesson ID", { status: 400 });
+  }
+  const offsetParam = url.searchParams.get("offset");
+  const offset = offsetParam === null ? 0 : Number(offsetParam);
+  if (Number.isNaN(offset)) {
+    throw data("Invalid offset", { status: 400 });
+  }
+
+  const course = resolveCourseForLesson(lessonId);
+  if (!course) {
+    throw data("Lesson not found", { status: 404 });
+  }
+  if (!canViewLesson(user, course)) {
+    throw data("You don't have access to this lesson", { status: 403 });
+  }
+
+  return {
+    comments: listTopLevelComments(lessonId, COMMENTS_PAGE_SIZE, offset).map(
+      (c) => ({ ...c, replies: listReplies(c.id) })
+    ),
+    total: countTopLevelComments(lessonId),
+  };
 }
 
 export async function action({ request }: Route.ActionArgs) {

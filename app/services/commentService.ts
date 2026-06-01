@@ -3,6 +3,9 @@ import { db } from "~/db";
 import { comments, users, UserRole } from "~/db/schema";
 import { sanitizeCommentHtml } from "~/lib/comment-sanitize.server";
 
+// Page size for paginated top-level comment loading ("Show more").
+export const COMMENTS_PAGE_SIZE = 20;
+
 // ─── Comment Service ───
 // Lesson comments: top-level comments and (one level deep) staff replies.
 // HTML is sanitized HERE before insert/update — this is the storage boundary.

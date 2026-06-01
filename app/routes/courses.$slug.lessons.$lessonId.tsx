@@ -55,7 +55,12 @@ import { resolveCountry } from "~/lib/country.server";
 import { checkPppAccess, COUNTRIES } from "~/lib/ppp";
 import { findPurchase } from "~/services/purchaseService";
 import { parseFormData, parseParams } from "~/lib/validation";
-import { listTopLevelComments, listReplies } from "~/services/commentService";
+import {
+  listTopLevelComments,
+  listReplies,
+  countTopLevelComments,
+  COMMENTS_PAGE_SIZE,
+} from "~/services/commentService";
 import { canViewLesson } from "~/lib/permissions";
 import { getUserById } from "~/services/userService";
 import { CommentsSection } from "~/components/comment-list";
@@ -253,11 +258,12 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   }
 
   // ─── Comments ───
-  // Attach each top-level comment's replies (oldest-first) for rendering.
-  const comments = listTopLevelComments(lessonId).map((c) => ({
-    ...c,
-    replies: listReplies(c.id),
-  }));
+  // Load the first page newest-first and attach each comment's replies
+  // (oldest-first) for rendering. "Show more" fetches further pages.
+  const comments = listTopLevelComments(lessonId, COMMENTS_PAGE_SIZE).map(
+    (c) => ({ ...c, replies: listReplies(c.id) })
+  );
+  const commentTotal = countTopLevelComments(lessonId);
   const viewerUser = currentUserId ? getUserById(currentUserId) : null;
   let canComment = false;
   if (viewerUser) {
@@ -288,6 +294,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
       slug: courseWithDetails.slug,
     },
     comments,
+    commentTotal,
     canComment,
     canReply,
     canModerate,
@@ -408,6 +415,7 @@ export default function LessonViewer({ loaderData }: Route.ComponentProps) {
     lesson,
     contentHtml,
     comments,
+    commentTotal,
     canComment,
     canReply,
     canModerate,
@@ -639,6 +647,7 @@ export default function LessonViewer({ loaderData }: Route.ComponentProps) {
           <CommentsSection
             lessonId={lesson.id}
             comments={comments}
+            commentTotal={commentTotal}
             canComment={canComment}
             canReply={canReply}
             canModerate={canModerate}
