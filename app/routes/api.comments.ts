@@ -7,8 +7,12 @@ import { getUserById } from "~/services/userService";
 import { getLessonById } from "~/services/lessonService";
 import { getModuleById } from "~/services/moduleService";
 import { getCourseById } from "~/services/courseService";
-import { canViewLesson } from "~/lib/permissions";
-import { createComment } from "~/services/commentService";
+import { canViewLesson, isStaff } from "~/lib/permissions";
+import {
+  createComment,
+  createReply,
+  getCommentById,
+} from "~/services/commentService";
 import {
   sanitizeCommentHtml,
   extractCommentText,
@@ -22,6 +26,12 @@ import { MAX_COMMENT_CHARS } from "~/lib/comment-colors";
 const createSchema = z.object({
   intent: z.literal("create"),
   lessonId: z.coerce.number().int().positive(),
+  contentHtml: z.string(),
+});
+
+const replySchema = z.object({
+  intent: z.literal("reply"),
+  parentId: z.coerce.number().int().positive(),
   contentHtml: z.string(),
 });
 
@@ -84,6 +94,42 @@ export async function action({ request }: Route.ActionArgs) {
 
     const comment = createComment(lessonId, user.id, sanitized);
     return { success: true, commentId: comment.id };
+  }
+
+  if (intent === "reply") {
+    // Only staff (admins/instructors) may reply to comments.
+    if (!isStaff(user)) {
+      throw data("Only staff can reply", { status: 403 });
+    }
+
+    const parsed = parseFormData(formData, replySchema);
+    if (!parsed.success) {
+      return data({ errors: parsed.errors }, { status: 400 });
+    }
+    const { parentId, contentHtml } = parsed.data;
+
+    const parent = getCommentById(parentId);
+    if (!parent) {
+      throw data("Comment not found", { status: 404 });
+    }
+
+    // Sanitize first (storage boundary), then validate the visible text.
+    const sanitized = sanitizeCommentHtml(contentHtml);
+    const error = validateCommentContent(sanitized);
+    if (error) {
+      return data({ errors: { contentHtml: error } }, { status: 400 });
+    }
+
+    try {
+      const reply = createReply(parentId, user.id, sanitized);
+      return { success: true, commentId: reply.id };
+    } catch {
+      // Depth guard: replying to a reply is rejected by the service.
+      return data(
+        { errors: { contentHtml: "Cannot reply to a reply" } },
+        { status: 400 }
+      );
+    }
   }
 
   throw data("Invalid action", { status: 400 });

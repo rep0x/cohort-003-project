@@ -114,6 +114,45 @@ export function listTopLevelComments(
   return query.all().map(toCommentWithAuthor);
 }
 
+/**
+ * Create a staff reply to a top-level comment. Replies are one level deep:
+ * the depth guard rejects replying to something that is itself a reply.
+ * HTML is sanitized before insert. Permission (staff-only) is enforced at the
+ * route boundary, not here.
+ */
+export function createReply(
+  parentId: number,
+  userId: number,
+  dirtyHtml: string
+) {
+  const parent = getCommentById(parentId);
+  if (!parent) throw new Error("Parent comment not found");
+  // Depth guard: only top-level comments (parentId === null) can be replied to.
+  if (parent.parentId !== null) throw new Error("Cannot reply to a reply");
+
+  const contentHtml = sanitizeCommentHtml(dirtyHtml);
+
+  return db
+    .insert(comments)
+    .values({ lessonId: parent.lessonId, userId, parentId: parent.id, contentHtml })
+    .returning()
+    .get();
+}
+
+/**
+ * List a comment's replies (oldest-first), with author info.
+ */
+export function listReplies(parentId: number): CommentWithAuthor[] {
+  return db
+    .select(authorSelection)
+    .from(comments)
+    .innerJoin(users, eq(comments.userId, users.id))
+    .where(eq(comments.parentId, parentId))
+    .orderBy(sql`${comments.createdAt} ASC`, sql`${comments.id} ASC`)
+    .all()
+    .map(toCommentWithAuthor);
+}
+
 /** Count a lesson's top-level comments (for pagination). */
 export function countTopLevelComments(lessonId: number): number {
   const result = db

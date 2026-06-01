@@ -1,5 +1,12 @@
+import { useState } from "react";
+import { Reply } from "lucide-react";
 import { UserAvatar } from "~/components/user-avatar";
+import { Button } from "~/components/ui/button";
+import { ReplyComposer } from "~/components/comment-reply";
 import { cn } from "~/lib/utils";
+
+// Viewer identity passed down for action affordances (e.g. who may reply).
+export type CommentViewer = { id: number; role: string };
 
 // Serializable shape of a comment as it crosses the loader boundary.
 export type CommentView = {
@@ -49,11 +56,20 @@ function StaffBadge({ role }: { role: string }) {
 export function CommentItem({
   comment,
   isReply = false,
+  viewer,
+  canReply = false,
+  lessonId,
 }: {
   comment: CommentView;
   isReply?: boolean;
+  viewer?: CommentViewer | null;
+  canReply?: boolean;
+  lessonId?: number;
 }) {
   const edited = comment.updatedAt !== comment.createdAt;
+  const [replying, setReplying] = useState(false);
+  // Reply is a top-level-only, staff-only affordance.
+  const showReply = !isReply && canReply && lessonId !== undefined;
 
   return (
     <div className={cn("flex gap-3", isReply && "mt-3")}>
@@ -81,7 +97,29 @@ export function CommentItem({
           dangerouslySetInnerHTML={{ __html: comment.contentHtml }}
         />
 
-        {/* Action affordances (reply / edit / delete) are added by later slices. */}
+        {/* Action affordances. Reply is top-level-only and staff-only. */}
+        {showReply && (
+          <div className="mt-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-7 px-2 text-muted-foreground"
+              onClick={() => setReplying((r) => !r)}
+            >
+              <Reply className="mr-1.5 size-3.5" />
+              Reply
+            </Button>
+          </div>
+        )}
+
+        {showReply && replying && (
+          <ReplyComposer
+            parentId={comment.id}
+            lessonId={lessonId!}
+            onPosted={() => setReplying(false)}
+          />
+        )}
 
         {/* Replies render oldest-first beneath their parent. */}
         {!isReply && comment.replies && comment.replies.length > 0 && (

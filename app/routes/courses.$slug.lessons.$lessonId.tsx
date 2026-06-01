@@ -55,7 +55,7 @@ import { resolveCountry } from "~/lib/country.server";
 import { checkPppAccess, COUNTRIES } from "~/lib/ppp";
 import { findPurchase } from "~/services/purchaseService";
 import { parseFormData, parseParams } from "~/lib/validation";
-import { listTopLevelComments } from "~/services/commentService";
+import { listTopLevelComments, listReplies } from "~/services/commentService";
 import { canViewLesson } from "~/lib/permissions";
 import { getUserById } from "~/services/userService";
 import { CommentsSection } from "~/components/comment-list";
@@ -253,17 +253,24 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   }
 
   // ─── Comments ───
-  const comments = listTopLevelComments(lessonId);
+  // Attach each top-level comment's replies (oldest-first) for rendering.
+  const comments = listTopLevelComments(lessonId).map((c) => ({
+    ...c,
+    replies: listReplies(c.id),
+  }));
+  const viewerUser = currentUserId ? getUserById(currentUserId) : null;
   let canComment = false;
-  if (currentUserId) {
-    const user = getUserById(currentUserId);
-    if (user) {
-      canComment = canViewLesson(user, {
-        id: courseWithDetails.id,
-        instructorId: courseWithDetails.instructorId,
-      });
-    }
+  if (viewerUser) {
+    canComment = canViewLesson(viewerUser, {
+      id: courseWithDetails.id,
+      instructorId: courseWithDetails.instructorId,
+    });
   }
+  // Only admins/instructors may reply to comments.
+  const canReply = !!(
+    viewerUser &&
+    (viewerUser.role === "admin" || viewerUser.role === "instructor")
+  );
 
   return {
     course: {
@@ -273,6 +280,8 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     },
     comments,
     canComment,
+    canReply,
+    viewer: viewerUser ? { id: viewerUser.id, role: viewerUser.role } : null,
     curriculum: courseWithDetails.modules.map((m) => ({
       id: m.id,
       title: m.title,
@@ -390,6 +399,8 @@ export default function LessonViewer({ loaderData }: Route.ComponentProps) {
     contentHtml,
     comments,
     canComment,
+    canReply,
+    viewer,
     lessonStatus,
     enrolled,
     currentUserId,
@@ -618,6 +629,8 @@ export default function LessonViewer({ loaderData }: Route.ComponentProps) {
             lessonId={lesson.id}
             comments={comments}
             canComment={canComment}
+            canReply={canReply}
+            viewer={viewer}
           />
 
           {/* Prev/Next Navigation */}

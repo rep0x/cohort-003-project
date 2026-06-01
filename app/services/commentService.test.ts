@@ -16,10 +16,13 @@ vi.mock("~/db", () => ({
 // Import after mock so the module picks up our test db
 import {
   createComment,
+  createReply,
+  listReplies,
   listTopLevelComments,
   countTopLevelComments,
   getCommentById,
 } from "./commentService";
+import { isStaff } from "~/lib/permissions";
 import {
   sanitizeCommentHtml,
   extractCommentText,
@@ -131,6 +134,90 @@ describe("commentService", () => {
       const c = createComment(lesson.id, base.user.id, "<p>x</p>");
       expect(getCommentById(c.id)?.id).toBe(c.id);
     });
+  });
+});
+
+describe("createReply / listReplies", () => {
+  beforeEach(() => {
+    testDb = createTestDb();
+    base = seedBaseData(testDb);
+    lesson = makeLesson();
+  });
+
+  it("creates a reply with parentId set and lessonId inherited from parent", () => {
+    const parent = createComment(lesson.id, base.user.id, "<p>parent</p>");
+    const reply = createReply(parent.id, base.instructor.id, "<p>reply</p>");
+
+    expect(reply.parentId).toBe(parent.id);
+    expect(reply.lessonId).toBe(lesson.id);
+    expect(reply.userId).toBe(base.instructor.id);
+    expect(reply.contentHtml).toContain("reply");
+  });
+
+  it("sanitizes reply HTML before insert", () => {
+    const parent = createComment(lesson.id, base.user.id, "<p>parent</p>");
+    const reply = createReply(
+      parent.id,
+      base.instructor.id,
+      "<p>hi</p><script>alert(1)</script>"
+    );
+
+    expect(reply.contentHtml).not.toContain("<script>");
+    expect(reply.contentHtml).toContain("hi");
+  });
+
+  it("throws when the parent comment does not exist", () => {
+    expect(() => createReply(9999, base.instructor.id, "<p>x</p>")).toThrow(
+      "Parent comment not found"
+    );
+  });
+
+  it("depth guard: rejects replying to a reply", () => {
+    const parent = createComment(lesson.id, base.user.id, "<p>parent</p>");
+    const reply = createReply(parent.id, base.instructor.id, "<p>reply</p>");
+
+    expect(() =>
+      createReply(reply.id, base.instructor.id, "<p>nope</p>")
+    ).toThrow("Cannot reply to a reply");
+  });
+
+  it("supports multiple replies under one comment, listed oldest-first", () => {
+    const parent = createComment(lesson.id, base.user.id, "<p>parent</p>");
+    const first = createReply(parent.id, base.instructor.id, "<p>first</p>");
+    const second = createReply(parent.id, base.instructor.id, "<p>second</p>");
+    // Make ordering deterministic regardless of timestamp resolution.
+    testDb
+      .update(schema.comments)
+      .set({ createdAt: "2020-01-01T00:00:00.000Z" })
+      .where(eq(schema.comments.id, first.id))
+      .run();
+    testDb
+      .update(schema.comments)
+      .set({ createdAt: "2020-02-01T00:00:00.000Z" })
+      .where(eq(schema.comments.id, second.id))
+      .run();
+
+    const replies = listReplies(parent.id);
+    expect(replies).toHaveLength(2);
+    expect(replies[0].id).toBe(first.id);
+    expect(replies[1].id).toBe(second.id);
+    expect(replies[0].author.name).toBe(base.instructor.name);
+    expect(replies[0].author.role).toBe(schema.UserRole.Instructor);
+  });
+
+  it("listReplies returns an empty array for a comment with no replies", () => {
+    const parent = createComment(lesson.id, base.user.id, "<p>parent</p>");
+    expect(listReplies(parent.id)).toEqual([]);
+  });
+
+  it("staff-only permission: only admins/instructors are staff", () => {
+    expect(isStaff({ id: base.user.id, role: schema.UserRole.Student })).toBe(
+      false
+    );
+    expect(
+      isStaff({ id: base.instructor.id, role: schema.UserRole.Instructor })
+    ).toBe(true);
+    expect(isStaff({ id: 0, role: schema.UserRole.Admin })).toBe(true);
   });
 });
 

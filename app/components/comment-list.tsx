@@ -3,7 +3,11 @@ import { useFetcher } from "react-router";
 import { MessageSquare } from "lucide-react";
 import { Button } from "~/components/ui/button";
 import { CommentEditor } from "~/components/comment-editor";
-import { CommentItem, type CommentView } from "~/components/comment-item";
+import {
+  CommentItem,
+  type CommentView,
+  type CommentViewer,
+} from "~/components/comment-item";
 import { MAX_COMMENT_CHARS } from "~/lib/comment-colors";
 
 // Lesson comments section: a composer (for anyone who can view the lesson)
@@ -13,10 +17,14 @@ export function CommentsSection({
   lessonId,
   comments,
   canComment,
+  viewer,
+  canReply = false,
 }: {
   lessonId: number;
   comments: CommentView[];
   canComment: boolean;
+  viewer?: CommentViewer | null;
+  canReply?: boolean;
 }) {
   return (
     <section className="mb-8 border-t pt-8">
@@ -47,7 +55,13 @@ export function CommentsSection({
       ) : (
         <div className="space-y-6">
           {comments.map((comment) => (
-            <CommentItem key={comment.id} comment={comment} />
+            <CommentItem
+              key={comment.id}
+              comment={comment}
+              lessonId={lessonId}
+              viewer={viewer}
+              canReply={canReply}
+            />
           ))}
         </div>
       )}
