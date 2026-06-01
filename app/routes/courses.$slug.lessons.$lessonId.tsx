@@ -274,6 +274,12 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     viewerUser &&
     (viewerUser.role === "admin" || viewerUser.role === "instructor")
   );
+  // Admins and the course's own instructor may delete any comment here.
+  const canModerate = !!(
+    viewerUser &&
+    (viewerUser.role === "admin" ||
+      courseWithDetails.instructorId === viewerUser.id)
+  );
 
   return {
     course: {
@@ -284,6 +290,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     comments,
     canComment,
     canReply,
+    canModerate,
     viewer,
     curriculum: courseWithDetails.modules.map((m) => ({
       id: m.id,
@@ -403,6 +410,7 @@ export default function LessonViewer({ loaderData }: Route.ComponentProps) {
     comments,
     canComment,
     canReply,
+    canModerate,
     viewer,
     lessonStatus,
     enrolled,
@@ -633,6 +641,7 @@ export default function LessonViewer({ loaderData }: Route.ComponentProps) {
             comments={comments}
             canComment={canComment}
             canReply={canReply}
+            canModerate={canModerate}
             viewer={viewer}
           />
 

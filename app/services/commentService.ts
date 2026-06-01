@@ -192,3 +192,34 @@ export function countTopLevelComments(lessonId: number): number {
 
   return result?.count ?? 0;
 }
+
+/**
+ * Hard-delete a comment. The author, any admin, and the course's instructor
+ * may delete. Deleting a top-level comment cascades to its replies; deleting a
+ * reply removes only that reply. Returns the deleted comment's id.
+ */
+export function deleteComment(
+  id: number,
+  user: { id: number; role: UserRole },
+  course: { id: number; instructorId: number }
+) {
+  const comment = getCommentById(id);
+  if (!comment) {
+    throw new Error("Comment not found");
+  }
+
+  const isAuthor = comment.userId === user.id;
+  const isAdmin = user.role === UserRole.Admin;
+  const isCourseInstructor = course.instructorId === user.id;
+  if (!isAuthor && !isAdmin && !isCourseInstructor) {
+    throw new Error("Not allowed to delete this comment");
+  }
+
+  // Top-level: cascade to replies first, then remove the comment itself.
+  if (comment.parentId === null) {
+    db.delete(comments).where(eq(comments.parentId, id)).run();
+  }
+  db.delete(comments).where(eq(comments.id, id)).run();
+
+  return { id };
+}

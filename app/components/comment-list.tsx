@@ -19,12 +19,14 @@ export function CommentsSection({
   canComment,
   viewer,
   canReply = false,
+  canModerate = false,
 }: {
   lessonId: number;
   comments: CommentView[];
   canComment: boolean;
   viewer?: CommentViewer | null;
   canReply?: boolean;
+  canModerate?: boolean;
 }) {
   return (
     <section className="mb-8 border-t pt-8">
@@ -61,6 +63,7 @@ export function CommentsSection({
               lessonId={lessonId}
               viewer={viewer}
               canReply={canReply}
+              canModerate={canModerate}
             />
           ))}
         </div>

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useFetcher } from "react-router";
-import { Reply, Pencil } from "lucide-react";
+import { Reply, Pencil, Trash2 } from "lucide-react";
 import { UserAvatar } from "~/components/user-avatar";
 import { Button } from "~/components/ui/button";
 import { ReplyComposer } from "~/components/comment-reply";
@@ -61,16 +61,19 @@ export function CommentItem({
   isReply = false,
   viewer,
   canReply = false,
+  canModerate,
   lessonId,
 }: {
   comment: CommentView;
   isReply?: boolean;
   viewer?: CommentViewer | null;
   canReply?: boolean;
+  canModerate?: boolean;
   lessonId?: number;
 }) {
   const edited = comment.updatedAt !== comment.createdAt;
   const canEdit = viewer?.id === comment.userId;
+  const canDelete = !!(canModerate || viewer?.id === comment.userId);
   const [editing, setEditing] = useState(false);
   const [replying, setReplying] = useState(false);
   // Reply is a top-level-only, staff-only affordance.
@@ -111,7 +114,7 @@ export function CommentItem({
         )}
 
         {/* Action affordances (reply / edit / delete). */}
-        {!editing && (showReply || canEdit) && (
+        {!editing && (showReply || canEdit || canDelete) && (
           <div className="mt-1 flex items-center gap-1">
             {showReply && (
               <Button
@@ -137,6 +140,9 @@ export function CommentItem({
                 Edit
               </Button>
             )}
+            {canDelete && (
+              <DeleteCommentButton commentId={comment.id} lessonId={lessonId} />
+            )}
           </div>
         )}
 
@@ -157,6 +163,7 @@ export function CommentItem({
                 comment={reply}
                 isReply
                 viewer={viewer}
+                canModerate={canModerate}
                 lessonId={lessonId}
               />
             ))}
@@ -248,6 +255,47 @@ function CommentEditForm({
           </Button>
         </div>
       </div>
+    </fetcher.Form>
+  );
+}
+
+// Hard-deletes a comment (cascading to replies if it's top-level). Permission
+// is enforced server-side; the button only renders when the viewer may delete.
+function DeleteCommentButton({
+  commentId,
+  lessonId,
+}: {
+  commentId: number;
+  lessonId?: number;
+}) {
+  const fetcher = useFetcher<{ success?: boolean }>();
+  const deleting = fetcher.state !== "idle";
+
+  return (
+    <fetcher.Form
+      method="post"
+      action="/api/comments"
+      onSubmit={(e) => {
+        if (!window.confirm("Delete this comment?")) {
+          e.preventDefault();
+        }
+      }}
+    >
+      <input type="hidden" name="intent" value="delete" />
+      <input type="hidden" name="commentId" value={commentId} />
+      {lessonId !== undefined && (
+        <input type="hidden" name="lessonId" value={lessonId} />
+      )}
+      <Button
+        type="submit"
+        size="sm"
+        variant="ghost"
+        disabled={deleting}
+        className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive"
+      >
+        <Trash2 className="mr-1 size-3.5" />
+        {deleting ? "Deleting…" : "Delete"}
+      </Button>
     </fetcher.Form>
   );
 }

@@ -22,6 +22,7 @@ import {
   countTopLevelComments,
   getCommentById,
   updateComment,
+  deleteComment,
 } from "./commentService";
 import { isStaff } from "~/lib/permissions";
 import {
@@ -291,5 +292,182 @@ describe("updateComment", () => {
 
     // Content is unchanged.
     expect(getCommentById(comment.id)?.contentHtml).toContain("original");
+  });
+});
+
+describe("deleteComment", () => {
+  let lesson: typeof schema.lessons.$inferSelect;
+
+  beforeEach(() => {
+    testDb = createTestDb();
+    base = seedBaseData(testDb);
+    lesson = testDb
+      .insert(schema.lessons)
+      .values({
+        moduleId: testDb
+          .insert(schema.modules)
+          .values({ courseId: base.course.id, title: "Module 1", position: 0 })
+          .returning()
+          .get().id,
+        title: "Lesson 1",
+        position: 0,
+      })
+      .returning()
+      .get();
+  });
+
+  // The course in seedBaseData has instructorId = base.instructor.id.
+  const courseCtx = () => ({
+    id: base.course.id,
+    instructorId: base.course.instructorId,
+  });
+
+  function makeReply(parentId: number, userId: number) {
+    return testDb
+      .insert(schema.comments)
+      .values({
+        lessonId: lesson.id,
+        userId,
+        parentId,
+        contentHtml: "<p>reply</p>",
+      })
+      .returning()
+      .get();
+  }
+
+  function makeAdmin() {
+    return testDb
+      .insert(schema.users)
+      .values({
+        name: "Admin User",
+        email: "admin@example.com",
+        role: schema.UserRole.Admin,
+      })
+      .returning()
+      .get();
+  }
+
+  it("lets the author delete their own comment", () => {
+    const comment = createComment(lesson.id, base.user.id, "<p>mine</p>");
+
+    deleteComment(
+      comment.id,
+      { id: base.user.id, role: schema.UserRole.Student },
+      courseCtx()
+    );
+
+    expect(getCommentById(comment.id)).toBeUndefined();
+  });
+
+  it("lets an admin delete any comment", () => {
+    const comment = createComment(lesson.id, base.user.id, "<p>mine</p>");
+    const admin = makeAdmin();
+
+    deleteComment(
+      comment.id,
+      { id: admin.id, role: schema.UserRole.Admin },
+      courseCtx()
+    );
+
+    expect(getCommentById(comment.id)).toBeUndefined();
+  });
+
+  it("lets the course's instructor delete any comment", () => {
+    const comment = createComment(lesson.id, base.user.id, "<p>mine</p>");
+
+    deleteComment(
+      comment.id,
+      { id: base.instructor.id, role: schema.UserRole.Instructor },
+      courseCtx()
+    );
+
+    expect(getCommentById(comment.id)).toBeUndefined();
+  });
+
+  it("rejects a different student who is not the author", () => {
+    const comment = createComment(lesson.id, base.user.id, "<p>mine</p>");
+    const other = testDb
+      .insert(schema.users)
+      .values({
+        name: "Other Student",
+        email: "other@example.com",
+        role: schema.UserRole.Student,
+      })
+      .returning()
+      .get();
+
+    expect(() =>
+      deleteComment(
+        comment.id,
+        { id: other.id, role: schema.UserRole.Student },
+        courseCtx()
+      )
+    ).toThrow("Not allowed to delete this comment");
+    expect(getCommentById(comment.id)).toBeDefined();
+  });
+
+  it("rejects an instructor who is not the course's instructor or author", () => {
+    const comment = createComment(lesson.id, base.user.id, "<p>mine</p>");
+    const otherInstructor = testDb
+      .insert(schema.users)
+      .values({
+        name: "Other Instructor",
+        email: "other-instructor@example.com",
+        role: schema.UserRole.Instructor,
+      })
+      .returning()
+      .get();
+
+    expect(() =>
+      deleteComment(
+        comment.id,
+        { id: otherInstructor.id, role: schema.UserRole.Instructor },
+        courseCtx()
+      )
+    ).toThrow("Not allowed to delete this comment");
+    expect(getCommentById(comment.id)).toBeDefined();
+  });
+
+  it("throws when the comment does not exist", () => {
+    expect(() =>
+      deleteComment(
+        99999,
+        { id: base.user.id, role: schema.UserRole.Student },
+        courseCtx()
+      )
+    ).toThrow("Comment not found");
+  });
+
+  it("cascades: deleting a top-level comment removes its replies", () => {
+    const parent = createComment(lesson.id, base.user.id, "<p>parent</p>");
+    const reply1 = makeReply(parent.id, base.instructor.id);
+    const reply2 = makeReply(parent.id, base.user.id);
+
+    deleteComment(
+      parent.id,
+      { id: base.instructor.id, role: schema.UserRole.Instructor },
+      courseCtx()
+    );
+
+    expect(getCommentById(parent.id)).toBeUndefined();
+    expect(getCommentById(reply1.id)).toBeUndefined();
+    expect(getCommentById(reply2.id)).toBeUndefined();
+  });
+
+  it("deleting a single reply removes only that reply", () => {
+    const parent = createComment(lesson.id, base.user.id, "<p>parent</p>");
+    const reply1 = makeReply(parent.id, base.instructor.id);
+    const reply2 = makeReply(parent.id, base.user.id);
+
+    // The reply's author deletes only their reply.
+    deleteComment(
+      reply2.id,
+      { id: base.user.id, role: schema.UserRole.Student },
+      courseCtx()
+    );
+
+    expect(getCommentById(reply2.id)).toBeUndefined();
+    expect(getCommentById(parent.id)).toBeDefined();
+    expect(getCommentById(reply1.id)).toBeDefined();
   });
 });

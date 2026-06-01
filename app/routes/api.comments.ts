@@ -12,6 +12,7 @@ import {
   createComment,
   createReply,
   updateComment,
+  deleteComment,
   getCommentById,
 } from "~/services/commentService";
 import {
@@ -40,6 +41,11 @@ const editSchema = z.object({
   intent: z.literal("edit"),
   commentId: z.coerce.number().int().positive(),
   contentHtml: z.string(),
+});
+
+const deleteSchema = z.object({
+  intent: z.literal("delete"),
+  commentId: z.coerce.number().int().positive(),
 });
 
 /** Resolve the course a lesson belongs to (for permission checks). */
@@ -163,6 +169,36 @@ export async function action({ request }: Route.ActionArgs) {
     }
 
     updateComment(commentId, user.id, sanitized);
+    return { success: true };
+  }
+
+  if (intent === "delete") {
+    const parsed = parseFormData(formData, deleteSchema);
+    if (!parsed.success) {
+      return data({ errors: parsed.errors }, { status: 400 });
+    }
+    const { commentId } = parsed.data;
+
+    const comment = getCommentById(commentId);
+    if (!comment) {
+      throw data("Comment not found", { status: 404 });
+    }
+
+    const course = resolveCourseForLesson(comment.lessonId);
+    if (!course) {
+      throw data("Lesson not found", { status: 404 });
+    }
+
+    try {
+      deleteComment(
+        commentId,
+        { id: user.id, role: user.role },
+        { id: course.id, instructorId: course.instructorId }
+      );
+    } catch {
+      throw data("Not allowed to delete this comment", { status: 403 });
+    }
+
     return { success: true };
   }
 
