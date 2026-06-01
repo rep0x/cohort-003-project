@@ -55,6 +55,10 @@ import { resolveCountry } from "~/lib/country.server";
 import { checkPppAccess, COUNTRIES } from "~/lib/ppp";
 import { findPurchase } from "~/services/purchaseService";
 import { parseFormData, parseParams } from "~/lib/validation";
+import { listTopLevelComments } from "~/services/commentService";
+import { canViewLesson } from "~/lib/permissions";
+import { getUserById } from "~/services/userService";
+import { CommentsSection } from "~/components/comment-list";
 
 const lessonParamsSchema = z.object({
   slug: z.string().min(1),
@@ -248,12 +252,27 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     }
   }
 
+  // ─── Comments ───
+  const comments = listTopLevelComments(lessonId);
+  let canComment = false;
+  if (currentUserId) {
+    const user = getUserById(currentUserId);
+    if (user) {
+      canComment = canViewLesson(user, {
+        id: courseWithDetails.id,
+        instructorId: courseWithDetails.instructorId,
+      });
+    }
+  }
+
   return {
     course: {
       id: courseWithDetails.id,
       title: courseWithDetails.title,
       slug: courseWithDetails.slug,
     },
+    comments,
+    canComment,
     curriculum: courseWithDetails.modules.map((m) => ({
       id: m.id,
       title: m.title,
@@ -369,6 +388,8 @@ export default function LessonViewer({ loaderData }: Route.ComponentProps) {
     module: mod,
     lesson,
     contentHtml,
+    comments,
+    canComment,
     lessonStatus,
     enrolled,
     currentUserId,
@@ -591,6 +612,13 @@ export default function LessonViewer({ loaderData }: Route.ComponentProps) {
               )}
             </div>
           )}
+
+          {/* Comments */}
+          <CommentsSection
+            lessonId={lesson.id}
+            comments={comments}
+            canComment={canComment}
+          />
 
           {/* Prev/Next Navigation */}
           <div className="flex items-center justify-between border-t pt-6">
